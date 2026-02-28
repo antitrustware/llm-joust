@@ -1,4 +1,4 @@
-# Multi-LLM Fan-Out & Evaluation System — Build Spec for Claude Code
+# Multi-LLM Fan-Out & Eval System — Build Spec for Claude Code
 
 ## What This Document Is
 
