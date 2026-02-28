@@ -43,6 +43,10 @@ def print_prompt(prompt: str) -> None:
     print(_c(DIM, prompt.strip()))
 
 
+def print_criteria(label: str, criteria_key: str) -> None:
+    print(f"\n  Evaluation mode: {_c(MAGENTA + BOLD, label)} {_c(DIM, f'(auto-detected: {criteria_key})')}")
+
+
 def print_round1(responses: list[dict]) -> None:
     """Print Round 1 response previews.
 

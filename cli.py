@@ -13,6 +13,7 @@ from src.pipeline import run_pipeline
 from src.display import (
     print_header,
     print_prompt,
+    print_criteria,
     print_round1,
     print_round2,
     print_round3,
@@ -151,6 +152,10 @@ async def main() -> None:
     else:
         # Display Round 1
         print_round1([r.to_dict() for r in result.responses])
+
+        # Show detected criteria
+        if result.judgments:
+            print_criteria(result.criteria_label, result.criteria_key)
 
         # Display Round 2 & 3
         if result.judgments:

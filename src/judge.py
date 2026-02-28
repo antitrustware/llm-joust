@@ -1,4 +1,4 @@
-"""Builds judge prompts and parses judge responses."""
+"""Builds judge prompts, auto-detects evaluation criteria, and parses judge responses."""
 
 import json
 import re
@@ -6,12 +6,113 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-JUDGE_SYSTEM_PROMPT = (
-    "You are an impartial AI response evaluator. Evaluate responses based on: "
-    "accuracy, completeness, clarity, usefulness, and reasoning quality. "
-    "Be fair and objective. Do not favor any particular AI model. "
-    "Respond ONLY with the requested JSON format."
-)
+# --- Criteria Presets ---
+
+CRITERIA_PRESETS: dict[str, dict] = {
+    "code": {
+        "label": "Code Quality",
+        "criteria": "correctness, efficiency, readability, best practices, and error handling",
+        "keywords": [
+            "code", "function", "class", "implement", "bug", "debug", "refactor",
+            "algorithm", "api", "script", "program", "syntax", "compile", "runtime",
+            "python", "javascript", "typescript", "rust", "java", "sql", "html", "css",
+            "react", "django", "flask", "node", "git", "docker", "regex", "database",
+            "def ", "import ", "print(", "console.log", "return ", "for loop", "while loop",
+        ],
+    },
+    "creative": {
+        "label": "Creative Writing",
+        "criteria": "originality, style, engagement, emotional impact, and literary craft",
+        "keywords": [
+            "write a story", "write a poem", "write a short", "write a song",
+            "creative", "fiction", "narrative", "poem", "poetry", "story",
+            "character", "dialogue", "plot", "scene", "metaphor", "haiku", "sonnet",
+            "short story", "essay", "blog post", "write me", "compose", "draft",
+            "tone", "voice", "rewrite", "storytelling", "limerick", "fairy tale",
+        ],
+    },
+    "factual": {
+        "label": "Factual Accuracy",
+        "criteria": "accuracy, sourcing, depth, objectivity, and comprehensiveness",
+        "keywords": [
+            "what is", "what are", "what was", "who is", "who was", "when did",
+            "when was", "where is", "where was", "how does", "how do",
+            "explain", "define", "history of", "tell me about", "capital of",
+            "difference between", "compare", "facts", "true", "science", "research",
+            "evidence", "study", "data", "statistics", "according to", "founded",
+        ],
+    },
+    "reasoning": {
+        "label": "Analytical Reasoning",
+        "criteria": "logical validity, evidence quality, consideration of counterarguments, depth of analysis, and conclusion strength",
+        "keywords": [
+            "why", "argue", "argument", "debate", "pros and cons", "trade-off",
+            "should i", "should we", "best approach", "analyze", "analysis",
+            "evaluate", "assess", "critical", "logic", "reasoning", "think through",
+            "implications", "consequences", "cause and effect", "opinion",
+            "what would happen", "hypothetical", "thought experiment",
+        ],
+    },
+    "instructional": {
+        "label": "Instructional Clarity",
+        "criteria": "clarity, step-by-step structure, actionability, completeness, and accessibility",
+        "keywords": [
+            "how to", "tutorial", "guide", "step by step", "steps to", "instructions",
+            "teach me", "learn", "walkthrough", "setup", "install", "configure",
+            "build", "create a", "make a", "recipe", "plan", "checklist",
+        ],
+    },
+    "math": {
+        "label": "Mathematical Rigor",
+        "criteria": "correctness, methodology, clarity of explanation, mathematical notation, and proof quality",
+        "keywords": [
+            "solve", "equation", "calculate", "math", "formula", "proof", "theorem",
+            "integral", "derivative", "probability", "statistics", "algebra",
+            "geometry", "calculus", "matrix", "vector", "polynomial",
+            "sum of", "product of", "find x", "find the value",
+        ],
+    },
+    "general": {
+        "label": "General Quality",
+        "criteria": "accuracy, completeness, clarity, usefulness, and reasoning quality",
+        "keywords": [],  # fallback — matches everything
+    },
+}
+
+
+def detect_criteria(prompt: str) -> str:
+    """Analyze the prompt and return the best-matching criteria preset key.
+
+    Scores each preset by counting keyword matches, returns the highest.
+    Falls back to 'general' if no strong signal.
+    """
+    prompt_lower = prompt.lower()
+    scores: dict[str, int] = {}
+
+    for key, preset in CRITERIA_PRESETS.items():
+        if key == "general":
+            continue
+        score = sum(1 for kw in preset["keywords"] if kw in prompt_lower)
+        if score > 0:
+            scores[key] = score
+
+    if not scores:
+        return "general"
+
+    return max(scores, key=scores.get)
+
+
+def get_judge_system_prompt(criteria_key: str = "general") -> str:
+    """Build the judge system prompt using the selected criteria preset."""
+    preset = CRITERIA_PRESETS.get(criteria_key, CRITERIA_PRESETS["general"])
+    criteria = preset["criteria"]
+
+    return (
+        f"You are an impartial AI response evaluator. Evaluate responses based on: "
+        f"{criteria}. "
+        f"Be fair and objective. Do not favor any particular AI model. "
+        f"Respond ONLY with the requested JSON format."
+    )
 
 
 def build_judge_prompt(

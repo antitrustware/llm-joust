@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 
 from .config import ModelConfig, TIMEOUT, TEMPERATURE, JUDGE_TEMPERATURE, get_available_models
 from .models import call_claude, call_gpt4o, call_gemini, call_grok
-from .judge import JUDGE_SYSTEM_PROMPT, build_judge_prompt, parse_judge_response
+from .judge import (
+    CRITERIA_PRESETS,
+    detect_criteria,
+    get_judge_system_prompt,
+    build_judge_prompt,
+    parse_judge_response,
+)
 from .utils import retry_with_backoff, with_timeout
 
 logger = logging.getLogger(__name__)
@@ -63,10 +69,13 @@ class PipelineResult:
     final_winner: str = ""
     points: dict[str, int] = field(default_factory=dict)
     votes: dict[str, int] = field(default_factory=dict)
+    criteria_key: str = "general"
+    criteria_label: str = "General Quality"
 
     def to_dict(self) -> dict:
         return {
             "prompt": self.prompt,
+            "criteria": self.criteria_label,
             "responses": [r.to_dict() for r in self.responses],
             "judgments": [j.to_dict() for j in self.judgments],
             "final_winner": self.final_winner,
@@ -114,7 +123,7 @@ async def round1_fanout(
 
 
 async def round2_evaluate(
-    prompt: str, responses: list[ModelResponse]
+    prompt: str, responses: list[ModelResponse], criteria_key: str = "general"
 ) -> list[JudgmentResult]:
     """Round 2: Have each successful model judge all responses."""
     # Only models that responded successfully can judge
@@ -125,11 +134,12 @@ async def round2_evaluate(
         return []
 
     judge_prompt = build_judge_prompt(prompt, successful)
+    judge_system = get_judge_system_prompt(criteria_key)
     valid_models = list(successful.keys())
 
     async def _judge(name: str) -> JudgmentResult:
         resp = await _call_model(
-            name, judge_prompt, system=JUDGE_SYSTEM_PROMPT, temperature=JUDGE_TEMPERATURE
+            name, judge_prompt, system=judge_system, temperature=JUDGE_TEMPERATURE
         )
         if resp.error:
             return JudgmentResult(judge_name=name, reasoning=f"Error: {resp.error}")
@@ -198,10 +208,19 @@ async def run_pipeline(
         logger.error("No models available. Check your API keys.")
         return result
 
+    # Auto-detect evaluation criteria from the prompt
+    criteria_key = detect_criteria(prompt)
+    criteria_label = CRITERIA_PRESETS[criteria_key]["label"]
+
     # Round 1
     responses = await round1_fanout(prompt, models)
 
-    result = PipelineResult(prompt=prompt, responses=responses)
+    result = PipelineResult(
+        prompt=prompt,
+        responses=responses,
+        criteria_key=criteria_key,
+        criteria_label=criteria_label,
+    )
 
     successful_count = sum(1 for r in responses if r.error is None)
 
@@ -209,7 +228,7 @@ async def run_pipeline(
         return result
 
     # Round 2
-    judgments = await round2_evaluate(prompt, responses)
+    judgments = await round2_evaluate(prompt, responses, criteria_key)
     result.judgments = judgments
 
     # Round 3
